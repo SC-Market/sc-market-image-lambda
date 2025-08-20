@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+.yarn/
+
+# Build outputs
+dist/
+*.zip
+
+# Environment files
+.env
+.env.local
+.env.*.local
+env.template
+
+# Git files
+.git/
+.gitignore
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Docker files
+Dockerfile
+.dockerignore
+
+# Documentation
+README.md
+deploy.sh

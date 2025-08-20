@@ -1,0 +1,27 @@
+# Build outputs
+dist/
+lambda.zip
+
+# Dependencies
+node_modules/
+.yarn/
+
+# Generated files
+*.min.js
+*.min.css
+
+# Package files
+package-lock.json
+yarn.lock
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
