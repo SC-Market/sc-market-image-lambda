@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "package": "./build.sh",
-    "deploy": "yarn package && aws lambda update-function-code --function-name sc-market-image-lambda --zip-file fileb://lambda.zip",
+    "deploy": "yarn package && aws lambda update-function-code --function-name sc-market-image-lambda --zip-file fileb://dist/lambda.zip",
     "format": "prettier --write \"src/**/*.{ts,js,json,md}\"",
     "format:check": "prettier --check \"src/**/*.{ts,js,json,md}\"",
     "lint": "yarn format:check",

@@ -34,7 +34,7 @@ print_error() {
 # Step 1: Clean previous builds
 print_status "Cleaning previous builds..."
 rm -rf dist/
-rm -f lambda.zip
+rm -f dist/lambda.zip
 
 # Step 2: Build TypeScript
 print_status "Building TypeScript code..."
@@ -75,7 +75,7 @@ fi
 
 # Step 5: Create deployment package
 print_status "Creating Lambda deployment package..."
-zip -r ../lambda.zip . > /dev/null
+zip -r lambda.zip . > /dev/null
 if [ $? -eq 0 ]; then
     print_success "Lambda package created successfully"
 else
@@ -90,11 +90,11 @@ rm -rf dist/node_modules dist/package.json dist/yarn.lock
 
 # Step 7: Verify package contents
 print_status "Verifying package contents..."
-PACKAGE_SIZE=$(du -h lambda.zip | cut -f1)
-FILE_COUNT=$(unzip -l lambda.zip | grep -c "^\s*[0-9]")
+PACKAGE_SIZE=$(du -h dist/lambda.zip | cut -f1)
+FILE_COUNT=$(unzip -l dist/lambda.zip | grep -c "^\s*[0-9]")
 
 print_success "Build completed successfully!"
-echo "📦 Package: lambda.zip"
+echo "📦 Package: dist/lambda.zip"
 echo "📏 Size: $PACKAGE_SIZE"
 echo "📁 Files: $FILE_COUNT"
 echo ""
