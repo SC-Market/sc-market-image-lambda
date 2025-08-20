@@ -178,21 +178,22 @@ export class ImageProcessor {
   ): Promise<{ buffer: Buffer; format: string; converted: boolean }> {
     const originalFormat = this.extractFormatFromContentType(contentType);
 
-    if (originalFormat === 'webp') {
-      return {
-        buffer: imageBuffer,
-        format: 'webp',
-        converted: false,
-      };
-    }
-
     try {
-      const webpBuffer = await this.convertToWebP(imageBuffer);
+      let webpBuffer: Buffer;
+      let converted = false;
+
+      if (originalFormat === 'webp') {
+        webpBuffer = await this.convertToWebP(imageBuffer);
+        converted = true;
+      } else {
+        webpBuffer = await this.convertToWebP(imageBuffer);
+        converted = true;
+      }
 
       return {
         buffer: webpBuffer,
         format: 'webp',
-        converted: true,
+        converted,
       };
     } catch (error) {
       if (error instanceof ImageProcessorError) {
@@ -272,7 +273,20 @@ export class ImageProcessor {
     try {
       const sharpInstance = await this.instantiateSharpImage(imageBuffer);
 
-      return await sharpInstance.webp({ quality: 80 }).toBuffer();
+      const webpOptions: sharp.WebpOptions = {
+        quality: 80,
+        effort: 4,
+        smartSubsample: true,
+        nearLossless: false,
+        lossless: false,
+      };
+
+      if (imageBuffer.length > 1024 * 1024) {
+        webpOptions.quality = 75;
+        webpOptions.effort = 5;
+      }
+
+      return await sharpInstance.webp(webpOptions).toBuffer();
     } catch (error) {
       if (error instanceof ImageProcessorError) {
         throw error;
