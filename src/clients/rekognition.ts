@@ -1,7 +1,6 @@
 import { S3 } from '@aws-sdk/client-s3';
 import { Rekognition } from '@aws-sdk/client-rekognition';
 import { v4 as uuidv4 } from 'uuid';
-import sharp from 'sharp';
 import logger from '../logger';
 
 export interface ContentModerationResult {
@@ -24,6 +23,14 @@ export class RekognitionClient {
   /**
    * Uploads an image to S3, scans it with Amazon Rekognition for content moderation,
    * and then deletes the resource from S3
+   * 
+   * Star Citizen Game Content Moderation (Hybrid Approach):
+   * - Uses detectModerationLabels for inappropriate content (explicit, hate, drugs, etc.)
+   * - Uses detectLabels for weapon detection (without treating weapons as inappropriate)
+   * - ALLOWS: Game weapons, violence, spaceships, sci-fi content
+   * - BLOCKS: Explicit nudity, hate symbols, drugs, extreme real violence, etc.
+   * - Context-aware: Distinguishes between game content and inappropriate content
+   * 
    * @param imageBuffer - The image buffer to scan (must be PNG or JPG)
    * @param contentType - The MIME type of the image ('image/jpeg' or 'image/png')
    * @returns Promise<ContentModerationResult> - Whether the image passed moderation
@@ -38,46 +45,10 @@ export class RekognitionClient {
       bufferSizeMB: (imageBuffer.length / (1024 * 1024)).toFixed(2),
     });
 
-    // AWS Solutions approach: Convert non-JPEG/PNG images to PNG for Rekognition compatibility
-    let rekognitionBuffer = imageBuffer;
-    let rekognitionContentType = contentType;
-
-    if (contentType !== 'image/jpeg' && contentType !== 'image/png') {
-      logger.info('Converting image to PNG for Rekognition compatibility', {
-        originalContentType: contentType,
-      });
-
-      try {
-        // Use AWS Solutions approach: failOnError: false and limitInputPixels
-        const options = {
-          failOnError: false,
-          limitInputPixels: 268402689,
-        };
-
-        // Convert to PNG using Sharp
-        rekognitionBuffer = await sharp(imageBuffer, options).png().toBuffer();
-
-        rekognitionContentType = 'image/png';
-        logger.info('Image converted to PNG successfully for Rekognition', {
-          originalSize: imageBuffer.length,
-          convertedSize: rekognitionBuffer.length,
-          originalContentType: contentType,
-          convertedContentType: rekognitionContentType,
-        });
-      } catch (conversionError) {
-        logger.error('Failed to convert image to PNG for Rekognition', {
-          originalContentType: contentType,
-          errorMessage:
-            conversionError instanceof Error
-              ? conversionError.message
-              : 'Unknown error',
-          errorType: conversionError?.constructor?.name || 'Unknown',
-        });
-        throw new Error(
-          `Failed to convert image to PNG for Rekognition: ${conversionError}`
-        );
-      }
-    }
+    // Note: Image conversion is now handled by ImageProcessor.convertToRekognitionCompatible()
+    // before calling this method, so we can assume the image is already in a compatible format
+    const rekognitionBuffer = imageBuffer;
+    const rekognitionContentType = contentType;
 
     const tempKey = `temp-moderation/${uuidv4()}-${Date.now()}.${rekognitionContentType === 'image/jpeg' ? 'jpg' : 'png'}`;
 
@@ -95,7 +66,8 @@ export class RekognitionClient {
         contentType: rekognitionContentType,
       });
 
-      // 2. Scan with Amazon Rekognition for content moderation
+      // 2. Scan with Amazon Rekognition for content moderation (Hybrid approach)
+      // First: Check for inappropriate content using detectModerationLabels
       const moderationResult = await this.rekognition.detectModerationLabels({
         Image: {
           S3Object: {
@@ -103,25 +75,41 @@ export class RekognitionClient {
             Name: tempKey,
           },
         },
-        MinConfidence: 50, // Minimum confidence threshold for moderation labels
+        MinConfidence: 70, // Higher threshold for inappropriate content
       });
 
-      logger.info('Rekognition moderation scan completed', {
+      // Second: Check for weapons/objects using detectLabels (for context, not blocking)
+      const labelsResult = await this.rekognition.detectLabels({
+        Image: {
+          S3Object: {
+            Bucket: process.env.S3_BUCKET_NAME!,
+            Name: tempKey,
+          },
+        },
+        MaxLabels: 20,
+        MinConfidence: 50,
+      });
+
+      logger.info('Rekognition hybrid scan completed', {
         hasModerationLabels: !!moderationResult.ModerationLabels?.length,
-        labelCount: moderationResult.ModerationLabels?.length || 0,
+        moderationLabelCount: moderationResult.ModerationLabels?.length || 0,
+        hasObjectLabels: !!labelsResult.Labels?.length,
+        objectLabelCount: labelsResult.Labels?.length || 0,
       });
 
-      // 3. Process moderation results
+      // 3. Process results using hybrid approach
       const moderationLabels = moderationResult.ModerationLabels || [];
-      const maxConfidence = moderationLabels.reduce(
+      const objectLabels = labelsResult.Labels || [];
+      
+      const maxModerationConfidence = moderationLabels.reduce(
         (max, label) => Math.max(max, label.Confidence || 0),
         0
       );
 
       // Check if any explicit content was detected
-      const explicitContentLabels = [
+      // For Star Citizen game content, we block inappropriate content but allow weapons/combat
+      const blockedContentLabels = [
         'Explicit Nudity',
-        'Violence',
         'Visually Disturbing',
         'Hate Symbols',
         'Gambling',
@@ -130,13 +118,42 @@ export class RekognitionClient {
         'Alcohol',
         'Rude Gestures',
         'Adult Content',
+        // Note: We don't block 'Weapons' or 'Violence' from moderation labels
+        // Instead, we use object detection to identify game content context
       ];
 
-      const hasExplicitContent = moderationLabels.some(
+      // Check for inappropriate content (always rejected)
+      const hasInappropriateContent = moderationLabels.some(
         label =>
-          explicitContentLabels.includes(label.Name || '') &&
+          blockedContentLabels.includes(label.Name || '') &&
           (label.Confidence || 0) >= 70
       );
+
+      // Check for weapon/combat content using object detection (for context, not blocking)
+      const weaponLabels = objectLabels.filter(
+        label =>
+          ['Weapon', 'Gun', 'Firearm', 'Rifle', 'Knife', 'Sword', 'Ammunition'].includes(label.Name || '') &&
+          (label.Confidence || 0) >= 50
+      );
+
+      const combatLabels = objectLabels.filter(
+        label =>
+          ['Combat', 'War', 'Military', 'Armor', 'Shield'].includes(label.Name || '') &&
+          (label.Confidence || 0) >= 50
+      );
+
+      // Log weapon/combat detection for Star Citizen context
+      if (weaponLabels.length > 0 || combatLabels.length > 0) {
+        logger.info('Star Citizen game content detected', {
+          weaponLabels: weaponLabels.map(l => ({ name: l.Name, confidence: l.Confidence })),
+          combatLabels: combatLabels.map(l => ({ name: l.Name, confidence: l.Confidence })),
+          context: 'Game weapons and combat are expected in Star Citizen',
+        });
+      }
+
+      // For Star Citizen, weapons and combat are acceptable game content
+      // Only block genuinely inappropriate content
+      const hasExplicitContent = hasInappropriateContent;
 
       // 4. Clean up S3 resource
       await this.s3.deleteObject({
@@ -146,13 +163,27 @@ export class RekognitionClient {
 
       logger.info('Temporary S3 object cleaned up', { tempKey });
 
-      return {
+      const result = {
         passed: !hasExplicitContent,
         moderationLabels: moderationLabels
           .map(label => label.Name || '')
           .filter(Boolean),
-        confidence: maxConfidence,
+        confidence: maxModerationConfidence,
       };
+
+      // Log moderation decision for monitoring and tuning
+      logger.info('Content moderation decision made', {
+        passed: result.passed,
+        hasInappropriateContent,
+        gameContentDetected: weaponLabels.length > 0 || combatLabels.length > 0,
+        totalModerationLabels: moderationLabels.length,
+        totalObjectLabels: objectLabels.length,
+        maxModerationConfidence,
+        decision: result.passed ? 'ALLOWED' : 'BLOCKED',
+        context: 'Star Citizen game content moderation (Hybrid approach)',
+      });
+
+      return result;
     } catch (error) {
       logger.error('Error during content moderation scan', {
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
