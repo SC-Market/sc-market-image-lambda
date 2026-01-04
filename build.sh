@@ -38,7 +38,7 @@ rm -f dist/lambda.zip
 
 # Step 2: Build TypeScript
 print_status "Building TypeScript code..."
-yarn && yarn build
+npm install && npm run build
 if [ $? -eq 0 ]; then
     print_success "TypeScript build completed"
 else
@@ -86,7 +86,7 @@ fi
 # Step 6: Clean up dist folder
 print_status "Cleaning up build artifacts..."
 cd ..
-rm -rf dist/node_modules dist/package.json dist/yarn.lock
+rm -rf dist/node_modules dist/package.json dist/package-lock.json
 
 # Step 7: Verify package contents
 print_status "Verifying package contents..."
@@ -98,4 +98,4 @@ echo "📦 Package: dist/lambda.zip"
 echo "📏 Size: $PACKAGE_SIZE"
 echo "📁 Files: $FILE_COUNT"
 echo ""
-echo "Ready for deployment with: yarn deploy"
+echo "Ready for deployment with: npm run deploy"

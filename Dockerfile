@@ -2,10 +2,10 @@ FROM amazon/aws-lambda-nodejs:22
 
 # Copy package files
 COPY package.json ${LAMBDA_TASK_ROOT}
-COPY yarn.lock ${LAMBDA_TASK_ROOT}
+COPY package-lock.json ${LAMBDA_TASK_ROOT}
 
-# Install dependencies using yarn
-RUN npm install --frozen-lockfile
+# Install dependencies using npm
+RUN npm ci
 
 # Copy source code
 COPY src/ ${LAMBDA_TASK_ROOT}/src/

@@ -22,10 +22,10 @@ fi
 FUNCTION_NAME=$1
 
 echo "📦 Building project..."
-yarn build
+npm run build
 
 echo "📦 Packaging Lambda..."
-yarn package
+npm run package
 
 echo "🚀 Deploying to AWS Lambda..."
 aws lambda update-function-code \
