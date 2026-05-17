@@ -205,13 +205,10 @@ export class RekognitionClient {
         });
       }
 
-      return {
-        passed: false,
-        moderationLabels: [],
-        confidence: 0,
-        error:
-          error instanceof Error ? error.message : 'Unknown error occurred',
-      };
+      // Throw infra errors — they are NOT moderation failures
+      throw new Error(
+        `Content moderation scan failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
     }
   }
 
