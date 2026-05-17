@@ -4,6 +4,12 @@ import logger from './logger';
 import { ImageProcessor } from './utils/image_processor';
 import { S3 } from '@aws-sdk/client-s3';
 
+const REQUIRED_ENV_VARS = ['B2_KEY_ID', 'B2_APP_KEY', 'B2_BUCKET_NAME', 'S3_BUCKET_NAME', 'CDN_URL'] as const;
+const missingEnvVars = REQUIRED_ENV_VARS.filter((v) => !process.env[v]);
+if (missingEnvVars.length > 0) {
+  logger.error('Missing required environment variables', { missing: missingEnvVars });
+}
+
 const backblazeS3 = new S3({
   endpoint: 'https://s3.us-west-004.backblazeb2.com',
   region: 'us-west-004',
@@ -89,12 +95,27 @@ export const handler = async (
       };
     }
 
-    const moderationResult = await scanImageForModeration(
-      imageBuffer,
-      contentType
-    );
+    let moderationResult: { passed: boolean; moderationLabels: string[]; confidence: number };
+    try {
+      moderationResult = await scanImageForModeration(imageBuffer, contentType);
+    } catch (scanError) {
+      logger.error('Content moderation scan infrastructure error', {
+        filename: body.filename,
+        error: scanError instanceof Error ? scanError.message : String(scanError),
+      });
+      return {
+        statusCode: 500,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          success: false,
+          message: `Content scanning unavailable: ${scanError instanceof Error ? scanError.message : 'Unknown error'}`,
+          error: 'SCAN_INFRA_ERROR',
+        } as LambdaResponse),
+      };
+    }
+
     if (!moderationResult.passed) {
-      logger.debug('Image failed moderation checks', {
+      logger.info('Image failed moderation checks', {
         filename: body.filename,
         moderationLabels: moderationResult.moderationLabels,
         confidence: moderationResult.confidence,
@@ -104,7 +125,9 @@ export const handler = async (
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           success: false,
-          message: 'Image failed moderation checks',
+          message: moderationResult.moderationLabels.length > 0
+            ? `Image rejected: flagged for ${moderationResult.moderationLabels.join(', ')}`
+            : 'Image failed moderation checks',
           error: 'MODERATION_FAILED',
           data: {
             moderationLabels: moderationResult.moderationLabels,
