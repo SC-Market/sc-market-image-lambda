@@ -18,6 +18,10 @@ export class ImageProcessor {
   private static readonly MAX_INPUT_PIXELS = 67108864;
   private static readonly MAX_PROCESSING_SIZE = 5 * 1024 * 1024;
   private static readonly MAX_IMAGE_DIMENSION = 8192;
+  // Authoritative downscale bound. The frontend downscales before upload, but
+  // direct API callers (and paths without a client) rely on this backstop so
+  // stored images never exceed a sane display resolution.
+  private static readonly MAX_OUTPUT_DIMENSION = 1920;
 
   static isSupportedFormat(contentType: string): boolean {
     const format = this.extractFormatFromContentType(contentType);
@@ -286,7 +290,15 @@ export class ImageProcessor {
         webpOptions.effort = 5;
       }
 
-      return await sharpInstance.webp(webpOptions).toBuffer();
+      // Downscale to fit within MAX_OUTPUT_DIMENSION on the longest side.
+      // `withoutEnlargement` leaves already-small images untouched.
+      return await sharpInstance
+        .resize(this.MAX_OUTPUT_DIMENSION, this.MAX_OUTPUT_DIMENSION, {
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .webp(webpOptions)
+        .toBuffer();
     } catch (error) {
       if (error instanceof ImageProcessorError) {
         throw error;

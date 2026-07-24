@@ -71,7 +71,10 @@ export const handler = async (
 
     const imageBuffer = Buffer.from(body.imageData, 'base64');
 
-    const maxSizeBytes = 2 * 1024 * 1024;
+    // 4MB decoded (~5.3MB base64) stays under the 6MB synchronous-invoke limit.
+    // Images are downscaled during WebP conversion, so this only bounds the
+    // raw input we're willing to decode.
+    const maxSizeBytes = 4 * 1024 * 1024;
     if (imageBuffer.length > maxSizeBytes) {
       logger.debug('Image file size too large', {
         filename: body.filename,
@@ -84,7 +87,7 @@ export const handler = async (
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           success: false,
-          message: `Image file size too large: ${(imageBuffer.length / (1024 * 1024)).toFixed(2)}MB. Maximum allowed size is 2MB.`,
+          message: `Image file size too large: ${(imageBuffer.length / (1024 * 1024)).toFixed(2)}MB. Maximum allowed size is 4MB.`,
           error: 'FILE_TOO_LARGE',
           data: {
             sizeBytes: imageBuffer.length,
