@@ -1,50 +1,30 @@
 name: Deploy Image Lambda
 
-# Auto-deploys on every push to main, and can also be triggered manually from
-# the Actions tab (workflow_dispatch). Building on ubuntu-latest (Linux x64) is
-# actually more reliable than deploying from a dev machine, because build.sh
-# reinstalls Sharp with native Linux binaries that match the Lambda runtime.
+# Auto-deploys on every push to main, and can also be triggered manually from the
+# Actions tab. Building on ubuntu-latest (Linux x64) is more reliable than
+# deploying from a dev machine, because build.sh reinstalls Sharp with native
+# Linux binaries that match the Lambda runtime.
+#
+# The implementation lives in the org-level reusable workflow — see
+# SC-Market/.github/.github/workflows/deploy-lambda.yml
 on:
   push:
     branches: ["main"]
   workflow_dispatch: {}
 
+# A called workflow only gets the permissions the caller grants, so these must be
+# declared here as well as in the reusable workflow.
 permissions:
   id-token: write # required for AWS OIDC
   contents: read
 
-env:
-  FUNCTION_NAME: sc-market-image-lambda
-  AWS_REGION: us-east-2
-
 jobs:
   deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22" # match Lambda runtime nodejs22.x
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build and package (installs Linux Sharp binaries)
-        run: npm run package
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::272095582125:role/github-actions-image-lambda-deploy
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Deploy to Lambda
-        run: |
-          aws lambda update-function-code \
-            --function-name "$FUNCTION_NAME" \
-            --zip-file fileb://dist/lambda.zip \
-            --publish
+    uses: SC-Market/.github/.github/workflows/deploy-lambda.yml@main
+    with:
+      function-name: sc-market-image-lambda
+      role-arn: arn:aws:iam::272095582125:role/github-actions-image-lambda-deploy
+      aws-region: us-east-2
+      node-version: "22" # match Lambda runtime nodejs22.x
+      package-command: package
+      zip-path: dist/lambda.zip
