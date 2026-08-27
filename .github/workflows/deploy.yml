@@ -28,3 +28,52 @@ jobs:
       node-version: "22" # match Lambda runtime nodejs22.x
       package-command: package
       zip-path: dist/lambda.zip
+
+  # Set the function's runtime environment from this repo's secrets.
+  # The CDK repo is private, so on the Free org plan it can't read the org-level
+  # secrets and shipped an empty env (the "Missing required environment variables"
+  # error). This repo is public, so it CAN read them — so runtime config lives
+  # here, applied via update-function-configuration after the code is published.
+  configure-env:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for AWS OIDC
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::272095582125:role/github-actions-image-lambda-deploy
+          aws-region: us-east-2
+
+      - name: Set Lambda environment variables
+        env:
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
+          CDN_URL: ${{ secrets.CDN_URL }}
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+        run: |
+          set -euo pipefail
+          # Build the env JSON with jq so secret values never appear on the
+          # command line (GitHub also masks them in logs).
+          jq -n \
+            --arg NODE_ENV production \
+            --arg LOG_LEVEL info \
+            --arg B2_KEY_ID "$B2_KEY_ID" \
+            --arg B2_APP_KEY "$B2_APP_KEY" \
+            --arg B2_BUCKET_NAME "$B2_BUCKET_NAME" \
+            --arg CDN_URL "$CDN_URL" \
+            --arg S3_BUCKET_NAME "$S3_BUCKET_NAME" \
+            '{Variables: {NODE_ENV: $NODE_ENV, LOG_LEVEL: $LOG_LEVEL, B2_KEY_ID: $B2_KEY_ID, B2_APP_KEY: $B2_APP_KEY, B2_BUCKET_NAME: $B2_BUCKET_NAME, CDN_URL: $CDN_URL, S3_BUCKET_NAME: $S3_BUCKET_NAME}}' \
+            > env.json
+
+          # The code publish (previous job) may still be settling; wait, then
+          # apply config, then wait again so the run reflects the final state.
+          aws lambda wait function-updated --function-name sc-market-image-lambda
+          aws lambda update-function-configuration \
+            --function-name sc-market-image-lambda \
+            --environment file://env.json
+          rm -f env.json
+          aws lambda wait function-updated --function-name sc-market-image-lambda
