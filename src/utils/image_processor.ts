@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import sharp, { type Sharp, type SharpOptions, type WebpOptions } from 'sharp';
 import logger from '../logger';
 
 export class ImageProcessorError extends Error {
@@ -44,11 +44,13 @@ export class ImageProcessor {
 
   private static async instantiateSharpImage(
     imageBuffer: Buffer,
-    options: sharp.SharpOptions = {}
-  ): Promise<sharp.Sharp> {
+    options: SharpOptions = {}
+  ): Promise<Sharp> {
     try {
-      const enhancedOptions: sharp.SharpOptions = {
-        failOnError: false,
+      const enhancedOptions: SharpOptions = {
+        // sharp 0.35 removed the deprecated `failOnError`; `failOn: 'none'` is
+        // its exact equivalent (`failOnError: false` mapped to it internally).
+        failOn: 'none',
         limitInputPixels: this.MAX_INPUT_PIXELS,
         sequentialRead: true,
         ...options,
@@ -277,7 +279,7 @@ export class ImageProcessor {
     try {
       const sharpInstance = await this.instantiateSharpImage(imageBuffer);
 
-      const webpOptions: sharp.WebpOptions = {
+      const webpOptions: WebpOptions = {
         quality: 80,
         effort: 4,
         smartSubsample: true,
