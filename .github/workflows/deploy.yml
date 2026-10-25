@@ -74,6 +74,7 @@ jobs:
           aws lambda wait function-updated --function-name sc-market-image-lambda
           aws lambda update-function-configuration \
             --function-name sc-market-image-lambda \
-            --environment file://env.json
+            --environment file://env.json \
+            --query LastUpdateStatus --output text
           rm -f env.json
           aws lambda wait function-updated --function-name sc-market-image-lambda
