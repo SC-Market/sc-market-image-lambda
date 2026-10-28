@@ -29,11 +29,14 @@ jobs:
       package-command: package
       zip-path: dist/lambda.zip
 
-  # Set the function's runtime environment from this repo's secrets.
-  # The CDK repo is private, so on the Free org plan it can't read the org-level
-  # secrets and shipped an empty env (the "Missing required environment variables"
-  # error). This repo is public, so it CAN read them — so runtime config lives
-  # here, applied via update-function-configuration after the code is published.
+  # LEGACY (pre-SSM): set the function's runtime environment from this repo's
+  # secrets. The CDK repo is private, so on the Free org plan it can't read the
+  # org-level secrets. But CloudFormation owns the function's Environment, so any
+  # `cdk deploy ImageLambdaStack` wiped these vars (2026-10-26 upload outage).
+  # The secrets now live in SSM (/sc-market/image-lambda/*, written by
+  # sync-ssm-secrets.yml) and CDK sets SECRETS_SSM_PATH. Once the live function
+  # has SECRETS_SSM_PATH this job does nothing: overwriting the env would drop
+  # the path and fight CDK. Delete this job after the SSM cutover (README).
   configure-env:
     needs: deploy
     runs-on: ubuntu-latest
@@ -56,6 +59,15 @@ jobs:
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
         run: |
           set -euo pipefail
+          aws lambda wait function-updated --function-name sc-market-image-lambda
+          # Prints only the (non-secret) parameter path, or None.
+          SSM_PATH=$(aws lambda get-function-configuration \
+            --function-name sc-market-image-lambda \
+            --query 'Environment.Variables.SECRETS_SSM_PATH' --output text)
+          if [ -n "$SSM_PATH" ] && [ "$SSM_PATH" != "None" ]; then
+            echo "Function reads its secrets from SSM ($SSM_PATH); CDK owns the environment. Not touching it."
+            exit 0
+          fi
           # Build the env JSON with jq so secret values never appear on the
           # command line (GitHub also masks them in logs).
           jq -n \

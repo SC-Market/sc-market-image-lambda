@@ -3,21 +3,22 @@ import { RekognitionClient } from './clients/rekognition';
 import logger from './logger';
 import { ImageProcessor } from './utils/image_processor';
 import { S3 } from '@aws-sdk/client-s3';
+import { ConfigError, getConfig, ImageLambdaConfig } from './config';
 
-const REQUIRED_ENV_VARS = ['B2_KEY_ID', 'B2_APP_KEY', 'B2_BUCKET_NAME', 'S3_BUCKET_NAME', 'CDN_URL'] as const;
-const missingEnvVars = REQUIRED_ENV_VARS.filter((v) => !process.env[v]);
-if (missingEnvVars.length > 0) {
-  logger.error('Missing required environment variables', { missing: missingEnvVars });
+let backblazeS3: S3 | undefined;
+function backblazeClient(config: ImageLambdaConfig): S3 {
+  if (!backblazeS3) {
+    backblazeS3 = new S3({
+      endpoint: 'https://s3.us-west-004.backblazeb2.com',
+      region: 'us-west-004',
+      credentials: {
+        accessKeyId: config.B2_KEY_ID,
+        secretAccessKey: config.B2_APP_KEY,
+      },
+    });
+  }
+  return backblazeS3;
 }
-
-const backblazeS3 = new S3({
-  endpoint: 'https://s3.us-west-004.backblazeb2.com',
-  region: 'us-west-004',
-  credentials: {
-    accessKeyId: process.env.B2_KEY_ID!,
-    secretAccessKey: process.env.B2_APP_KEY!,
-  },
-});
 
 interface UploadRequest {
   imageData: string;
@@ -35,6 +36,20 @@ interface LambdaResponse {
 export const handler = async (
   event: APIGatewayProxyEvent
 ): Promise<APIGatewayProxyResult> => {
+  // Missing config is an outage, not a per-request error: throw so the
+  // invocation fails (Lambda Errors metric -> ImageLambdaErrorAlarm) instead of
+  // returning a 500 payload that the Errors metric never sees.
+  let config: ImageLambdaConfig;
+  try {
+    config = await getConfig();
+  } catch (configError) {
+    logger.error('Image lambda configuration unavailable', {
+      error: configError instanceof Error ? configError.message : String(configError),
+      missing: configError instanceof ConfigError ? configError.missing : undefined,
+    });
+    throw configError;
+  }
+
   try {
     const body: UploadRequest = event as unknown as UploadRequest;
 
@@ -100,7 +115,7 @@ export const handler = async (
 
     let moderationResult: { passed: boolean; moderationLabels: string[]; confidence: number };
     try {
-      moderationResult = await scanImageForModeration(imageBuffer, contentType);
+      moderationResult = await scanImageForModeration(imageBuffer, contentType, config.S3_BUCKET_NAME);
     } catch (scanError) {
       logger.error('Content moderation scan infrastructure error', {
         filename: body.filename,
@@ -143,6 +158,7 @@ export const handler = async (
     const finalFilename = body.filename.replace(/\.[^/.]+$/, '.webp');
 
     const backblazeUrl = await uploadImageToBackblaze(
+      config,
       imageBuffer,
       finalFilename,
       contentType
@@ -187,7 +203,8 @@ export const handler = async (
 
 async function scanImageForModeration(
   imageBuffer: Buffer,
-  contentType: string
+  contentType: string,
+  bucket: string
 ): Promise<{
   passed: boolean;
   moderationLabels: string[];
@@ -202,7 +219,8 @@ async function scanImageForModeration(
 
     const moderationResult = await RekognitionClient.scanImageForModeration(
       rekognitionImage.buffer,
-      ImageProcessor.getMimeType(rekognitionImage.format)
+      ImageProcessor.getMimeType(rekognitionImage.format),
+      bucket
     );
 
     return {
@@ -216,6 +234,7 @@ async function scanImageForModeration(
 }
 
 async function uploadImageToBackblaze(
+  config: ImageLambdaConfig,
   imageBuffer: Buffer,
   filename: string,
   contentType: string
@@ -226,14 +245,14 @@ async function uploadImageToBackblaze(
       contentType
     );
 
-    await backblazeS3.putObject({
-      Bucket: process.env.B2_BUCKET_NAME!,
+    await backblazeClient(config).putObject({
+      Bucket: config.B2_BUCKET_NAME,
       Key: filename,
       Body: webpImage.buffer,
       ContentType: ImageProcessor.getMimeType(webpImage.format),
     });
 
-    return `${process.env.CDN_URL}/${filename}`;
+    return `${config.CDN_URL}/${filename}`;
   } catch (error) {
     throw new Error(`Failed to upload image to Backblaze: ${error}`);
   }

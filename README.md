@@ -120,6 +120,35 @@ src/
    yarn package
    ```
 
+## Secrets: SSM Parameter Store
+
+`B2_KEY_ID`, `B2_APP_KEY`, `B2_BUCKET_NAME`, `S3_BUCKET_NAME` and `CDN_URL` are
+read once per cold start (`src/config.ts`):
+
+- If `SECRETS_SSM_PATH` is set (the CDK `ImageLambdaStack` sets it to
+  `/sc-market/image-lambda`), from SecureString parameters
+  `/sc-market/image-lambda/<NAME>`. CloudFormation owns the function's
+  Environment, so secrets must not live there: a `cdk deploy ImageLambdaStack`
+  resets it (the 2026-10-26 upload outage).
+- Otherwise from the environment variables of the same names (pre-SSM setup).
+
+A missing value makes every invocation fail (FunctionError), which trips the
+CDK `ImageLambdaErrorAlarm` and notifies the ops SNS topic.
+
+Populate or rotate the parameters with the **Sync secrets to SSM** workflow
+(`sync-ssm-secrets.yml`, manual). After a rotation, run **Deploy Image Lambda**
+so new instances load the new values.
+
+SSM cutover, in this order (the lambda has working config after every step):
+
+1. CDK: deploy `GitHubOIDCStack` (lets this repo's deploy role write the
+   parameters).
+2. Here: run **Sync secrets to SSM**.
+3. CDK: deploy `ImageLambdaStack` (lambda role may read the parameters; sets
+   `SECRETS_SSM_PATH`).
+4. Delete the `configure-env` job from `deploy.yml` (it already skips itself
+   once `SECRETS_SSM_PATH` is live).
+
 ## Environment Variables
 
 The Lambda function requires the following environment variables:

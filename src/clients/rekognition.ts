@@ -33,11 +33,13 @@ export class RekognitionClient {
    * 
    * @param imageBuffer - The image buffer to scan (must be PNG or JPG)
    * @param contentType - The MIME type of the image ('image/jpeg' or 'image/png')
+   * @param bucket - S3 bucket for the temporary moderation object
    * @returns Promise<ContentModerationResult> - Whether the image passed moderation
    */
   static async scanImageForModeration(
     imageBuffer: Buffer,
-    contentType: string
+    contentType: string,
+    bucket: string
   ): Promise<ContentModerationResult> {
     logger.info('Starting content moderation scan', {
       contentType,
@@ -55,7 +57,7 @@ export class RekognitionClient {
     try {
       // 1. Upload image to S3 for scanning
       await this.s3.putObject({
-        Bucket: process.env.S3_BUCKET_NAME!,
+        Bucket: bucket,
         Key: tempKey,
         Body: rekognitionBuffer,
         ContentType: rekognitionContentType,
@@ -71,7 +73,7 @@ export class RekognitionClient {
       const moderationResult = await this.rekognition.detectModerationLabels({
         Image: {
           S3Object: {
-            Bucket: process.env.S3_BUCKET_NAME!,
+            Bucket: bucket,
             Name: tempKey,
           },
         },
@@ -82,7 +84,7 @@ export class RekognitionClient {
       const labelsResult = await this.rekognition.detectLabels({
         Image: {
           S3Object: {
-            Bucket: process.env.S3_BUCKET_NAME!,
+            Bucket: bucket,
             Name: tempKey,
           },
         },
@@ -157,7 +159,7 @@ export class RekognitionClient {
 
       // 4. Clean up S3 resource
       await this.s3.deleteObject({
-        Bucket: process.env.S3_BUCKET_NAME!,
+        Bucket: bucket,
         Key: tempKey,
       });
 
@@ -194,7 +196,7 @@ export class RekognitionClient {
       // Attempt to clean up the temporary S3 object even if there was an error
       try {
         await this.s3.deleteObject({
-          Bucket: process.env.S3_BUCKET_NAME!,
+          Bucket: bucket,
           Key: tempKey,
         });
         logger.info('Cleaned up temporary S3 object after error', { tempKey });
@@ -216,14 +218,16 @@ export class RekognitionClient {
    * Alternative method that accepts a file path instead of buffer
    * @param filePath - Path to the image file
    * @param contentType - The MIME type of the image ('image/jpeg' or 'image/png')
+   * @param bucket - S3 bucket for the temporary moderation object
    * @returns Promise<ContentModerationResult> - Whether the image passed moderation
    */
   static async scanImageFileForModeration(
     filePath: string,
-    contentType: string
+    contentType: string,
+    bucket: string
   ): Promise<ContentModerationResult> {
     const fs = await import('node:fs');
     const imageBuffer = fs.readFileSync(filePath);
-    return this.scanImageForModeration(imageBuffer, contentType);
+    return this.scanImageForModeration(imageBuffer, contentType, bucket);
   }
 }
