@@ -139,15 +139,9 @@ Populate or rotate the parameters with the **Sync secrets to SSM** workflow
 (`sync-ssm-secrets.yml`, manual). After a rotation, run **Deploy Image Lambda**
 so new instances load the new values.
 
-SSM cutover, in this order (the lambda has working config after every step):
-
-1. CDK: deploy `GitHubOIDCStack` (lets this repo's deploy role write the
-   parameters).
-2. Here: run **Sync secrets to SSM**.
-3. CDK: deploy `ImageLambdaStack` (lambda role may read the parameters; sets
-   `SECRETS_SSM_PATH`).
-4. Delete the `configure-env` job from `deploy.yml` (it already skips itself
-   once `SECRETS_SSM_PATH` is live).
+The SSM cutover was completed on 2026-10-29: `GitHubOIDCStack`, then **Sync
+secrets to SSM**, then `ImageLambdaStack`. The deploy workflow no longer sets
+the function's environment; CDK owns it.
 
 ## Environment Variables
 
